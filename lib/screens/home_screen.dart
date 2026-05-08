@@ -6,17 +6,17 @@ import '../services/expense_service.dart';
 import '../widgets/expense_tile.dart';
 import 'add_expense_screen.dart';
 import 'edit_expense_screen.dart';
- 
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
- 
+
 class _HomeScreenState extends State<HomeScreen> {
   // null = show ALL categories; a specific value filters the list
   ExpenseCategory? _selectedCategory;
- 
+
   // Category display name helper
   String _label(ExpenseCategory? cat) {
     if (cat == null) return 'All';
@@ -29,7 +29,48 @@ class _HomeScreenState extends State<HomeScreen> {
       case ExpenseCategory.other:         return 'Other';
     }
   }
- 
+
+  // --- EXERCISE 2: Method to show the Budget Dialog ---
+  void _showBudgetDialog() {
+    final settingsBox = Hive.box('settings');
+    final TextEditingController budgetController = TextEditingController(
+      text: settingsBox.get('monthly_budget')?.toString() ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Set Monthly Budget"),
+        content: TextField(
+          controller: budgetController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: "Enter Amount (₱)",
+            prefixText: "₱ ",
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              double? newBudget = double.tryParse(budgetController.text);
+              if (newBudget != null) {
+                // Requirement: Save a budget value (Stored in 'settings' box)
+                await settingsBox.put('monthly_budget', newBudget);
+                Navigator.pop(context);
+                setState(() {}); // Refresh UI
+              }
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -37,6 +78,11 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('SpendWise', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          // Requirement: "Set Budget" button
+          IconButton(
+            icon: const Icon(Icons.account_balance_wallet),
+            onPressed: _showBudgetDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.info_outline),
             onPressed: () => showAboutDialog(
@@ -52,18 +98,40 @@ class _HomeScreenState extends State<HomeScreen> {
       body: ValueListenableBuilder<Box<Expense>>(
         valueListenable: ExpenseService.listenable,
         builder: (context, box, _) {
-          // Recalculate every time the box changes
-          final double total = box.values.fold(0.0, (s, e) => s + e.amount);
+          // --- EXERCISE 2: Logic from Hint Code ---
+          final settingsBox = Hive.box('settings');
+          
+          // Read the budget value (returns null if not set yet)
+          final double budget = (settingsBox.get('monthly_budget') ?? 0.0) as double;
+          
+          // Recalculate total every time the box changes
+          final double totalSpent = box.values.fold(0.0, (s, e) => s + e.amount);
+          
+          // Calculate percentage used
+          final double percentage = budget > 0 ? (totalSpent / budget).clamp(0.0, 1.0) : 0.0;
+
+          // Show alert if over 80% (Requirement)
+          if (percentage >= 0.8 && budget > 0) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(
+                  "⚠️ Budget Alert: You've used ${(percentage * 100).toStringAsFixed(0)}% of your monthly budget!"),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 4),
+              ));
+            });
+          }
+
           final List<Expense> expenses = _selectedCategory == null
               ? ExpenseService.getAllExpenses()
               : ExpenseService.getExpensesByCategory(_selectedCategory!);
- 
+
           // Sort by date descending (newest first)
           expenses.sort((a, b) => b.date.compareTo(a.date));
- 
+
           return Column(
             children: [
-              _buildSummaryCard(total, box.length),
+              _buildSummaryCard(totalSpent, box.length, percentage, budget),
               _buildFilterChips(),
               Expanded(child: _buildExpenseList(expenses)),
             ],
@@ -78,8 +146,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
- 
-  Widget _buildSummaryCard(double total, int count) {
+
+  Widget _buildSummaryCard(double total, int count, double percentage, double budget) {
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       elevation: 4,
@@ -87,26 +155,57 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
           children: [
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Total Spending',
-                style: const TextStyle(fontSize: 14, color: Colors.black54)),
-              Text('$count expense${count == 1 ? '' : 's'}',
-                style: const TextStyle(fontSize: 12, color: Colors.black45)),
-            ]),
-            Text(
-              '₱${total.toStringAsFixed(2)}', // ₱ symbol
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold,
-                color: Colors.indigo),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Total Spending',
+                    style: TextStyle(fontSize: 14, color: Colors.black54)),
+                  Text('$count expense${count == 1 ? '' : 's'}',
+                    style: const TextStyle(fontSize: 12, color: Colors.black45)),
+                ]),
+                Text(
+                  '₱${total.toStringAsFixed(2)}', 
+                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold,
+                    color: Colors.indigo),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // --- EXERCISE 2: Progress Bar (Requirement) ---
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: percentage,
+                backgroundColor: Colors.black12,
+                // Requirement: Color turns red when spending >= 80%
+                color: percentage >= 0.8 ? Colors.red : Colors.indigo,
+                minHeight: 12,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Budget: ₱${budget.toStringAsFixed(2)}", 
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)
+                ),
+                Text(
+                  "${(percentage * 100).toStringAsFixed(0)}%", 
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
   }
- 
+
   Widget _buildFilterChips() {
     final categories = [null, ...ExpenseCategory.values];
     return SingleChildScrollView(
@@ -124,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
- 
+
   Widget _buildExpenseList(List<Expense> expenses) {
     if (expenses.isEmpty) {
       return Center(
