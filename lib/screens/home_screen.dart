@@ -1,8 +1,8 @@
-// lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/expense.dart';
 import '../services/expense_service.dart';
+import '../services/export_service.dart'; // Exercise 3 Import
 import '../widgets/expense_tile.dart';
 import 'add_expense_screen.dart';
 import 'edit_expense_screen.dart';
@@ -14,10 +14,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // null = show ALL categories; a specific value filters the list
   ExpenseCategory? _selectedCategory;
 
-  // Category display name helper
   String _label(ExpenseCategory? cat) {
     if (cat == null) return 'All';
     switch (cat) {
@@ -30,10 +28,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- EXERCISE 2: Method to show the Budget Dialog ---
+  // --- EXERCISE 2: Set Budget Dialog ---
   void _showBudgetDialog() {
     final settingsBox = Hive.box('settings');
-    final TextEditingController budgetController = TextEditingController(
+    final controller = TextEditingController(
       text: settingsBox.get('monthly_budget')?.toString() ?? '',
     );
 
@@ -42,26 +40,20 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context) => AlertDialog(
         title: const Text("Set Monthly Budget"),
         content: TextField(
-          controller: budgetController,
+          controller: controller,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: "Enter Amount (₱)",
-            prefixText: "₱ ",
-          ),
+          decoration: const InputDecoration(labelText: "Budget Amount (₱)"),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () async {
-              double? newBudget = double.tryParse(budgetController.text);
-              if (newBudget != null) {
-                // Requirement: Save a budget value (Stored in 'settings' box)
-                await settingsBox.put('monthly_budget', newBudget);
+              double? val = double.tryParse(controller.text);
+              if (val != null) {
+                // Save a budget value (Stored in 'settings' box)
+                await settingsBox.put('monthly_budget', val);
                 Navigator.pop(context);
-                setState(() {}); // Refresh UI
+                setState(() {}); 
               }
             },
             child: const Text("Save"),
@@ -78,10 +70,22 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('SpendWise', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          // Requirement: "Set Budget" button
+          // EXERCISE 2: Budget Button
           IconButton(
-            icon: const Icon(Icons.account_balance_wallet),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
             onPressed: _showBudgetDialog,
+          ),
+          // EXERCISE 3: Export Button
+          IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: () async {
+              final path = await ExportService.exportCurrentMonth();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("Exported to: $path"), backgroundColor: Colors.green),
+                );
+              }
+            },
           ),
           IconButton(
             icon: const Icon(Icons.info_outline),
@@ -94,28 +98,19 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      // ValueListenableBuilder listens to the Hive box and rebuilds automatically
       body: ValueListenableBuilder<Box<Expense>>(
         valueListenable: ExpenseService.listenable,
         builder: (context, box, _) {
-          // --- EXERCISE 2: Logic from Hint Code ---
+          // --- EXERCISE 2 HINT CODE LOGIC ---
           final settingsBox = Hive.box('settings');
-          
-          // Read the budget value (returns null if not set yet)
           final double budget = (settingsBox.get('monthly_budget') ?? 0.0) as double;
-          
-          // Recalculate total every time the box changes
           final double totalSpent = box.values.fold(0.0, (s, e) => s + e.amount);
-          
-          // Calculate percentage used
           final double percentage = budget > 0 ? (totalSpent / budget).clamp(0.0, 1.0) : 0.0;
 
-          // Show alert if over 80% (Requirement)
           if (percentage >= 0.8 && budget > 0) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(
-                  "⚠️ Budget Alert: You've used ${(percentage * 100).toStringAsFixed(0)}% of your monthly budget!"),
+                content: Text("⚠️ Budget Alert: You've used ${(percentage * 100).toStringAsFixed(0)}% of your monthly budget!"),
                 backgroundColor: Colors.orange,
                 duration: const Duration(seconds: 4),
               ));
@@ -126,7 +121,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ? ExpenseService.getAllExpenses()
               : ExpenseService.getExpensesByCategory(_selectedCategory!);
 
-          // Sort by date descending (newest first)
           expenses.sort((a, b) => b.date.compareTo(a.date));
 
           return Column(
@@ -161,27 +155,19 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Total Spending',
-                    style: TextStyle(fontSize: 14, color: Colors.black54)),
-                  Text('$count expense${count == 1 ? '' : 's'}',
-                    style: const TextStyle(fontSize: 12, color: Colors.black45)),
+                  const Text('Total Spending', style: TextStyle(fontSize: 14, color: Colors.black54)),
+                  Text('$count expense${count == 1 ? '' : 's'}', style: const TextStyle(fontSize: 12, color: Colors.black45)),
                 ]),
-                Text(
-                  '₱${total.toStringAsFixed(2)}', 
-                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold,
-                    color: Colors.indigo),
-                ),
+                Text('₱${total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.indigo)),
               ],
             ),
-            const SizedBox(height: 16),
-            
-            // --- EXERCISE 2: Progress Bar (Requirement) ---
+            const SizedBox(height: 15),
+            // EXERCISE 2: Progress Bar
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: LinearProgressIndicator(
                 value: percentage,
                 backgroundColor: Colors.black12,
-                // Requirement: Color turns red when spending >= 80%
                 color: percentage >= 0.8 ? Colors.red : Colors.indigo,
                 minHeight: 12,
               ),
@@ -190,14 +176,8 @@ class _HomeScreenState extends State<HomeScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  "Budget: ₱${budget.toStringAsFixed(2)}", 
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)
-                ),
-                Text(
-                  "${(percentage * 100).toStringAsFixed(0)}%", 
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)
-                ),
+                Text("Budget: ₱${budget.toStringAsFixed(2)}", style: const TextStyle(fontSize: 12)),
+                Text("${(percentage * 100).toStringAsFixed(0)}%", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               ],
             ),
           ],
@@ -230,11 +210,9 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[400]),
           const SizedBox(height: 16),
-          Text('No expenses yet!',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600])),
+          Text('No expenses yet!', style: TextStyle(fontSize: 18, color: Colors.grey[600])),
           const SizedBox(height: 8),
-          Text('Tap the button below to add your first expense.',
-            style: TextStyle(color: Colors.grey[400])),
+          Text('Tap the button below to add your first expense.', style: TextStyle(color: Colors.grey[400])),
         ]),
       );
     }
@@ -247,8 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
           expense: expense,
           onDelete: () => ExpenseService.deleteExpense(key),
           onEdit: () => Navigator.push(ctx,
-            MaterialPageRoute(builder: (_) =>
-              EditExpenseScreen(expense: expense, expenseKey: key))),
+            MaterialPageRoute(builder: (_) => EditExpenseScreen(expense: expense, expenseKey: key))),
         );
       },
     );
